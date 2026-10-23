@@ -56,7 +56,3 @@ npm test
 cd ai-service-python
 .\.venv\Scripts\python.exe -m pytest -q
 ```
-
-## Observação
-
-Esta versão do projeto foi limpa para operar apenas na camada de backend e IA. A interface web e qualquer referência a frontend foram removidas do workspace ativo.
