@@ -1,0 +1,11 @@
+{
+  "name": "globo-flow-backend-only",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Globo Flow — execução somente do backend e IA.",
+  "scripts": {
+    "start": "npm --prefix backend-node start",
+    "test": "npm --prefix backend-node test",
+    "start:backend": "cmd /c start-backend.bat"
+  }
+}

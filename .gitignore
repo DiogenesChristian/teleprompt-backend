@@ -1,0 +1,12 @@
+node_modules/
+.DS_Store
+Thumbs.db
+
+# backend
+backend-node/.env
+backend-node/data/
+
+# serviço de IA
+ai-service-python/.venv/
+__pycache__/
+.pytest_cache/

@@ -1,0 +1,12 @@
+# Opcional: sobe um MongoDB local para o backend.
+#   docker compose up -d
+# e no backend-node/.env:  MONGODB_URI=mongodb://localhost:27017/globoflow
+services:
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+volumes:
+  mongo-data:
