@@ -269,3 +269,39 @@ test('plano de corte: relógio e posição da rolagem', async () => {
     ws.close();
   } finally { await srv.stop(); }
 });
+
+test('tempo real: tela espelho segue a principal e é avisada quando ela cai (Disaster Recovery)', async () => {
+  const srv = await boot();
+  try {
+    const c = client(srv.port); await c.register('Gabi', 'Jornalista / Editor');
+    await c.call('PUT', '/api/scripts/rt-1', sample());
+    const principal = await wsOpen(srv.port, c.token);
+    const hp = await principal.waitFor('hello');
+    principal.send(JSON.stringify({ type: 'join', scriptId: 'rt-1' }));
+    assert.equal((await principal.waitFor('control')).id, null, 'ninguém controla ainda');
+    principal.send(JSON.stringify({ type: 'control:claim' }));
+    assert.equal((await principal.waitFor('control', (m) => m.id)).id, hp.cid);
+
+    const espelho = await wsOpen(srv.port, c.token);
+    await espelho.waitFor('hello');
+    espelho.send(JSON.stringify({ type: 'join', scriptId: 'rt-1' }));
+    const ctl = await espelho.waitFor('control');
+    assert.equal(ctl.id, hp.cid, 'a tela nova sabe quem controla');
+    assert.equal(ctl.by, 'Gabi');
+
+    principal.send(JSON.stringify({ type: 'mirror:state', pos: 12.5, running: true, wpm: 150, elapsedMs: 3000, started: true }));
+    const st = await espelho.waitFor('mirror:state');
+    assert.equal(st.pos, 12.5); assert.equal(st.running, true); assert.equal(st.wpm, 150);
+
+    // espelho não pode mandar posição sem assumir
+    espelho.send(JSON.stringify({ type: 'mirror:state', pos: 99 }));
+    await assert.rejects(principal.waitFor('mirror:state', null, 300));
+
+    principal.close(); // a principal cai
+    assert.equal((await espelho.waitFor('control', (m) => m.id === null)).id, null);
+    espelho.send(JSON.stringify({ type: 'control:claim' }));
+    const novo = await espelho.waitFor('control', (m) => m.id);
+    assert.ok(novo.id && novo.id !== hp.cid, 'o espelho assumiu');
+    espelho.close();
+  } finally { await srv.stop(); }
+});
