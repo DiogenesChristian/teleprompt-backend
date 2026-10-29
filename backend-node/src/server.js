@@ -12,7 +12,7 @@ async function start(overrides = {}) {
   await db.connect();
   const server = http.createServer();
   const hubRef = {};
-  const app = createApp({ cfg, db, hub: { scriptUpdated: (...a) => hubRef.hub.scriptUpdated(...a) } });
+  const app = createApp({ cfg, db, hub: { scriptUpdated: (...a) => hubRef.hub.scriptUpdated(...a), isLive: (id) => hubRef.hub.isLive(id) } });
   server.on('request', app);
   hubRef.hub = createHub({ server, cfg, db, openSpeech: overrides.openSpeech });
   await new Promise((r) => server.listen(overrides.port != null ? overrides.port : cfg.PORT, r));

@@ -12,6 +12,15 @@ module.exports = {
   JWT_SECRET: env.JWT_SECRET || 'troque-este-segredo',
   // Código exigido para criar conta de Jornalista / Editor (quem aprova roteiros). Vazio = sem código.
   EDITOR_CODE: env.EDITOR_CODE || '',
+  // Funções que podem alterar o texto de um roteiro que está NO AR (teleprompter rodando).
+  // Separadas por vírgula. * = qualquer usuário logado.
+  LIVE_EDIT_ROLES: (env.LIVE_EDIT_ROLES || 'Jornalista / Editor,Produtor').split(',').map((s) => s.trim()).filter(Boolean),
+  // O que acontece com a aprovação quando o texto muda durante o ao vivo:
+  //   manter-se-editor → continua aprovado se quem editou for Jornalista / Editor; senão volta para revisão
+  //                      (padrão, decisão da equipe em 29/10/2026)
+  //   revisao          → qualquer mudança volta para "Em revisão"
+  //   manter           → continua aprovado (a mudança fica no histórico)
+  LIVE_EDIT_APPROVAL: env.LIVE_EDIT_APPROVAL || 'manter-se-editor',
   // Endereços do frontend liberados no CORS, separados por vírgula. * = todos.
   CORS_ORIGIN: env.CORS_ORIGIN || '*',
   // Serviço de IA em Python (revisão do roteiro).

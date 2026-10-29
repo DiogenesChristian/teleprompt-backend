@@ -5,14 +5,23 @@
 'use strict';
 const jwt = require('jsonwebtoken');
 
-const ROLES = ['Apresentador', 'Jornalista / Editor', 'Operador de teleprompter', 'Produtor'];
+// A função "Operador de teleprompter" foi retirada (decisão da equipe em 29/10/2026):
+// a voz rola o texto e a tela reserva recebe a posição sozinha.
+const ROLES = ['Apresentador', 'Jornalista / Editor', 'Produtor'];
 const EDITOR = 'Jornalista / Editor';
 
+/* Função válida. Contas antigas de Operador de teleprompter entram como Apresentador. */
+function normalizeRole(role) { return ROLES.includes(role) ? role : 'Apresentador'; }
+
 function sign(user, secret) {
-  return jwt.sign({ sub: user.id, name: user.name, role: user.role }, secret, { expiresIn: '12h' });
+  return jwt.sign({ sub: user.id, name: user.name, role: normalizeRole(user.role) }, secret, { expiresIn: '12h' });
 }
 function verify(token, secret) {
-  try { return jwt.verify(token, secret); } catch (e) { return null; }
+  try {
+    const u = jwt.verify(token, secret);
+    u.role = normalizeRole(u.role); // tokens emitidos antes da mudança
+    return u;
+  } catch (e) { return null; }
 }
 
 /* Middleware: exige Authorization: Bearer <token>. */
@@ -26,4 +35,4 @@ function requireAuth(secret) {
   };
 }
 
-module.exports = { ROLES, EDITOR, sign, verify, requireAuth };
+module.exports = { ROLES, EDITOR, normalizeRole, sign, verify, requireAuth };
