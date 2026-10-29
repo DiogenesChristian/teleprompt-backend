@@ -5,7 +5,7 @@ const WebSocket = require('ws');
 const { start } = require('../src/server');
 const { createMemoryDb } = require('../src/db/memory');
 
-/* Serviço de IA falso: responde como o serviço Python. */
+
 function fakeAi(handler) {
   return new Promise((resolve) => {
     const s = http.createServer((req, res) => {
@@ -17,7 +17,7 @@ function fakeAi(handler) {
   });
 }
 
-/* Deepgram falsa: confere a chave, recebe áudio e devolve uma transcrição. */
+
 function fakeDeepgram(phrases) {
   return new Promise((resolve) => {
     const wss = new WebSocket.Server({ port: 0 }, () => resolve(wss));
@@ -260,7 +260,8 @@ test('plano de corte: relógio e posição da rolagem', async () => {
     await c.call('PUT', '/api/scripts/rt-1', Object.assign(sample(), { durationSec: 10 }));
     const ws = await wsOpen(srv.port, c.token);
     ws.send(JSON.stringify({ type: 'join', scriptId: 'rt-1' }));
-    ws.send(JSON.stringify({ type: 'clock', elapsedSec: 18, wordIndex: 0 })); // passou 8 s do previsto
+    ws.send(JSON.stringify({ type: 'clock', elapsedSec: 18, wordIndex: 0 })); 
+    
     const t = await ws.waitFor('tracker', (m) => m.cutPlan.tight);
     assert.deepEqual(t.cutPlan.essential, ['a1']);
     ws.send(JSON.stringify({ type: 'clock', elapsedSec: 2, wordIndex: 4 }));

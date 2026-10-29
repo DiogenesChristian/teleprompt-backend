@@ -92,3 +92,52 @@ test('mudança de última hora mantém os estados das âncoras', () => {
   t.load(s);
   assert.equal(t.snapshot().anchors.a1, 'dita');
 });
+
+
+test('acompanha mesmo quando o apresentador troca algumas palavras', () => {
+  const t = new Tracker(script());
+  // roteiro: "O Governo Federal anunciou hoje um pacote de R$ 12 bilhões para 15 estados brasileiros"
+  const s = t.push('o governo federal divulgou nesta segunda um pacote de doze bilhões para quinze estados', true, 1000);
+  assert.equal(t.words[s.pos - 1], 'estados', 'parou depois de "estados" (pos ' + s.pos + ')');
+  assert.equal(s.offScript, false);
+});
+
+test('palavra no singular ou plural conta como a mesma', () => {
+  const { same } = require('../src/speech/tracker');
+  assert.ok(same('estados', 'estado'));
+  assert.ok(same('brasileiros', 'brasileiro'));
+  assert.ok(!same('12', '13'));
+});
+
+test('edição de última hora mantém a fala no mesmo ponto do tópico', () => {
+  const t = new Tracker(script());
+  t.push('a ministra helena duarte afirmou que as obras começam', true, 1000);
+  const before = t.snapshot(1000);
+  assert.equal(before.block, 1);
+  const s = script();
+  s.blocks[0].text = 'Texto novo bem maior no começo. ' + 'Mais uma frase inserida aqui agora. '.repeat(3) + s.blocks[0].text;
+  t.load(s);
+  const after = t.snapshot(1000);
+  assert.equal(after.block, 1, 'continua no tópico 2');
+  
+  assert.equal(t.words[after.pos], 'pelo');
+});
+
+test('tópico apagado leva a fala para o começo do próximo', () => {
+  const t = new Tracker(script());
+  t.setPosition(26); // dentro do tópico 2
+  const s = script(); s.blocks.splice(1, 1);
+  t.load(s);
+  assert.equal(t.snapshot().block, 1);
+  assert.equal(t.words[t.pos], 'voce');
+});
+
+test('sinaliza quando a leitura começou (para o teleprompter rodar sozinho)', () => {
+  const t = new Tracker(script());
+  assert.equal(t.snapshot(500).reading, false);
+  let s = t.push('bom dia a todos', true, 1000);
+  assert.equal(s.reading, false, 'fala fora do roteiro não conta');
+  s = t.push('boa noite o governo federal anunciou', true, 2000);
+  assert.equal(s.reading, true);
+  assert.equal(t.snapshot(2000 + 5000).reading, false, 'parou de bater com o roteiro');
+});

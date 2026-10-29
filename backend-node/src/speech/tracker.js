@@ -26,12 +26,12 @@ const NUMS = {
   cinquenta: '50', sessenta: '60', setenta: '70', oitenta: '80', noventa: '90', cem: '100'
 };
 
-const REF_WPM = 150;           // ritmo de referência de telejornal
-const OFF_WORDS = 8;           // palavras fora do roteiro para considerar improviso
-const OFF_MS = 4000;           // ... e há pelo menos 4 s sem bater com o texto
+const REF_WPM = 150;          
+const OFF_WORDS = 8;           
+const OFF_MS = 4000;           
 const SEARCH_BACK = 25, SEARCH_AHEAD = 140;
 
-/* Texto → palavras normalizadas (sem acento, pontuação ou marcações técnicas). */
+
 function words(text) {
   return String(text || '').replace(CUE_RE, ' ').toLowerCase()
     .normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -42,7 +42,7 @@ function words(text) {
 }
 
 function lev1(a, b) {
-  // distância de edição ≤ 1 (tolerância a erro de reconhecimento)
+  
   if (Math.abs(a.length - b.length) > 1) return false;
   let i = 0, j = 0, edits = 0;
   while (i < a.length && j < b.length) {
@@ -52,19 +52,46 @@ function lev1(a, b) {
   }
   return edits + (a.length - i) + (b.length - j) <= 1;
 }
+
+function stem(w) {
+  return w.length >= 5 ? w.replace(/(oes|aes|ais|eis|res|es|s)$/, '').slice(0, 6) : w;
+}
+function levN(a, b, max) {
+ 
+  if (Math.abs(a.length - b.length) > max) return false;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (cur[j] < best) best = cur[j];
+    }
+    if (best > max) return false;
+    prev = cur;
+  }
+  return prev[b.length] <= max;
+}
 function same(a, b) {
   if (a === b) return true;
   if (!a || !b) return false;
   if (/\d/.test(a) || /\d/.test(b)) return false;
-  if (a.length >= 5 && b.length >= 5) return lev1(a, b);
+  if (a.length >= 5 && b.length >= 5) {
+    if (lev1(a, b)) return true;
+    if (stem(a) === stem(b)) return true;
+    if (a.length >= 8 && b.length >= 8) return levN(a, b, 2);
+  }
   return false;
 }
+const FUZZY_TAIL = 8;      
+const FUZZY_RATIO = 0.6;   
+const READING_MS = 4000;   
 
 class Tracker {
   constructor(script) {
     this.load(script);
     this.pos = 0;
-    this.spoken = [];          // [{w, t}] últimas palavras finais
+    this.spoken = [];          
     this.lastMatchAt = 0;
     this.unmatched = 0;
     this.offScript = false;
@@ -74,9 +101,10 @@ class Tracker {
     (this.script.anchors || []).forEach((a) => { this.states[a.id] = 'pendente'; });
   }
 
-  /* (Re)carrega o roteiro mantendo estados das âncoras (mudança de última hora). */
+  
   load(script) {
     const prev = this.states || {};
+    const old = this.words ? { script: this.script, pos: this.pos, blockStart: this.blockStart, wordBlock: this.wordBlock, total: this.words.length } : null;
     this.script = script || { blocks: [], anchors: [] };
     this.words = []; this.wordBlock = []; this.blockStart = [];
     (this.script.blocks || []).forEach((b, i) => {
@@ -101,13 +129,34 @@ class Tracker {
       this.states = {};
       (this.script.anchors || []).forEach((a) => { this.states[a.id] = prev[a.id] || 'pendente'; });
     }
+    if (old && typeof old.pos === 'number') {
+      this.pos = this.remap(old);
+      this.unmatched = 0;
+      if (this.spoken && this.spoken.length >= 3) this.align(); // ajusta pelo que acabou de ser dito
+    }
+  }
+
+  
+  remap(old) {
+    if (!old.total || !this.words.length) return 0;
+    if (old.pos >= old.total) return this.words.length;
+    const ob = old.wordBlock[Math.max(0, Math.min(old.pos, old.total - 1))];
+    const offset = old.pos - old.blockStart[ob];
+    const oldBlocks = old.script.blocks || [], blocks = this.script.blocks || [];
+    for (let k = ob; k < oldBlocks.length; k++) {
+      const nb = blocks.findIndex((b) => b.id === oldBlocks[k].id);
+      if (nb < 0) continue; // tópico apagado: vai para o começo do próximo que ainda existe
+      const start = this.blockStart[nb], end = nb + 1 < this.blockStart.length ? this.blockStart[nb + 1] : this.words.length;
+      return k === ob ? Math.min(start + offset, end) : start;
+    }
+    return this.words.length;
   }
 
   setAnchor(id, state) { if (this.states[id]) this.states[id] = state; }
   setPosition(wordIndex) { this.pos = Math.max(0, Math.min(this.words.length, wordIndex | 0)); this.unmatched = 0; }
   setClock(elapsedSec) { this.elapsedSec = Math.max(0, +elapsedSec || 0); }
 
-  /* Recebe um trecho reconhecido. Só os finais mexem no estado. */
+  
   push(text, isFinal, now) {
     now = now || Date.now();
     if (!isFinal) return this.snapshot(now);
@@ -128,7 +177,7 @@ class Tracker {
     return this.snapshot(now);
   }
 
-  /* Procura as últimas palavras faladas perto da posição atual. */
+  
   align() {
     const tail = this.spoken.slice(-4).map((x) => x.w);
     if (tail.length < 3) {
@@ -146,7 +195,35 @@ class Tracker {
     }
     const need = n >= 4 ? 3 : n;
     if (best >= 0 && bestScore >= need) { this.pos = Math.min(this.words.length, best + n); return true; }
-    return false;
+    return this.alignLoose();
+  }
+
+  
+  alignLoose() {
+    const tail = this.spoken.map((x) => x.w).filter((w) => !STOP.has(w)).slice(-FUZZY_TAIL);
+    if (tail.length < 3) return false;
+    const need = Math.max(3, Math.ceil(tail.length * FUZZY_RATIO));
+    const span = tail.length * 2 + 4;
+    const from = Math.max(0, this.pos - SEARCH_BACK), to = Math.min(this.words.length - 1, this.pos + SEARCH_AHEAD);
+    let best = null;
+    for (let i = from; i <= to; i++) {
+      // casamento em ordem (subsequência), guloso
+      let j = 0, k = i, hits = 0, last = -1;
+      const lim = Math.min(this.words.length, i + span);
+      while (j < tail.length && k < lim) {
+        if (STOP.has(this.words[k])) { k++; continue; }
+        let found = -1;
+        for (let m = k; m < Math.min(lim, k + 4); m++) if (same(this.words[m], tail[j])) { found = m; break; }
+        if (found >= 0) { hits++; last = found; k = found + 1; }
+        j++;
+      }
+      if (hits < need || last < 0) continue;
+      const dist = Math.abs(i - this.pos);
+      if (!best || hits > best.hits || (hits === best.hits && dist < best.dist)) best = { hits, last, dist };
+    }
+    if (!best) return false;
+    this.pos = Math.min(this.words.length, best.last + 1);
+    return true;
   }
 
   markAnchors() {
@@ -171,7 +248,7 @@ class Tracker {
     return Math.round(recent.length / span * 60000);
   }
 
-  /* Cartão de ponte: frase curta para voltar ao roteiro. */
+ 
   makeBridge() {
     const pending = this.anchorInfo.filter((i) => this.states[i.a.id] === 'pendente');
     const late = pending.filter((i) => i.end + 3 < this.pos);
@@ -217,7 +294,7 @@ class Tracker {
     return sentences[sentences.length - 1].trim();
   }
 
-  /* Plano de corte: se o tempo não fecha, o que pode sair e o que fica. */
+  
   cutPlan() {
     const duration = +this.script.durationSec || 0;
     if (!duration) return { tight: false };
@@ -245,6 +322,8 @@ class Tracker {
       total: this.words.length,
       block: this.wordBlock[Math.min(this.pos, this.words.length - 1)] || 0,
       wpm: this.wpm(now || Date.now()),
+      // a fala está batendo com o roteiro agora (usado para começar a rolar sozinho)
+      reading: !!this.lastMatchAt && (now || Date.now()) - this.lastMatchAt < READING_MS,
       anchors: Object.assign({}, this.states),
       behind: this.behind(),
       offScript: this.offScript,
@@ -254,4 +333,4 @@ class Tracker {
   }
 }
 
-module.exports = { Tracker, words, same };
+module.exports = { Tracker, words, same, stem };

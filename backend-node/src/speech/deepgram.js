@@ -38,7 +38,7 @@ function openDeepgram(cfg, { onText, onError, onClose }) {
   ws.on('error', (err) => { if (!closed) onError(err); });
   ws.on('close', () => { closed = true; clearInterval(keep); onClose && onClose(); });
 
-  // A Deepgram fecha a conexão após ~10 s sem áudio; o KeepAlive evita isso durante pausas.
+  
   const keep = setInterval(() => {
     if (ws.readyState === WebSocket.OPEN && Date.now() - lastAudio > 5000) ws.send(JSON.stringify({ type: 'KeepAlive' }));
   }, 4000);
