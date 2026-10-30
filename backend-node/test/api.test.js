@@ -305,3 +305,33 @@ test('tempo real: tela espelho segue a principal e é avisada quando ela cai (Di
     espelho.close();
   } finally { await srv.stop(); }
 });
+
+
+test('tempo real: mudar título, duração ou ordem dos tópicos também avisa', async () => {
+  const srv = await boot();
+  try {
+    const c = client(srv.port); await c.register('Andreza', 'Jornalista / Editor');
+    const s = sample();
+    s.blocks.push({ id: 'b2', title: 'Fim', durationSec: 10, text: 'Boa noite.' });
+    await c.call('PUT', '/api/scripts/rt-1', s);
+    const ws = await wsOpen(srv.port, c.token);
+    ws.send(JSON.stringify({ type: 'join', scriptId: 'rt-1' }));
+    await ws.waitFor('presence');
+
+    s.blocks[0].title = 'Abertura nova';                      // só o título
+    await c.call('PUT', '/api/scripts/rt-1', s);
+    let m = await ws.waitFor('script:updated');
+    assert.deepEqual(m.changed, ['b1']);
+
+    s.blocks[1].durationSec = 20;                             // só a duração
+    await c.call('PUT', '/api/scripts/rt-1', s);
+    m = await ws.waitFor('script:updated');
+    assert.deepEqual(m.changed, ['b2']);
+
+    s.blocks.reverse();                                       // só a ordem
+    await c.call('PUT', '/api/scripts/rt-1', s);
+    m = await ws.waitFor('script:updated');
+    assert.equal(m.script.blocks[0].id, 'b2');
+    ws.close();
+  } finally { await srv.stop(); }
+});

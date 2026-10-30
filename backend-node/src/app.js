@@ -142,7 +142,8 @@ function createApp({ cfg, db, hub }) {
     }
     await db.scripts.upsert(script);
     const changed = changedBlocks(old, script);
-    if (old && (changed.length || old.title !== script.title || (old.anchors || []).length !== script.anchors.length)) {
+        const mudouOrdem = old && orderChanged(old, script);
+    if (old && (changed.length || mudouOrdem || old.title !== script.title || (old.anchors || []).length !== script.anchors.length)) {
       hub.scriptUpdated(script, { by: req.user.name, changed });
     }
     res.json({ script });
@@ -228,8 +229,15 @@ function changedBlocks(old, now) {
   if (!old) return [];
   return now.blocks.filter((b) => {
     const o = (old.blocks || []).find((x) => x.id === b.id);
-    return !o || o.text !== b.text;
+        return !o || o.text !== b.text || o.title !== b.title || o.durationSec !== b.durationSec;
   }).map((b) => b.id);
+}
+
+/* A ordem dos tópicos mudou? (também pega tópico removido ou adicionado) */
+function orderChanged(old, now) {
+  const antes = (old.blocks || []).map((b) => b.id).join(',');
+  const agora = (now.blocks || []).map((b) => b.id).join(',');
+  return antes !== agora;
 }
 
 module.exports = { createApp };
