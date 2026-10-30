@@ -22,7 +22,7 @@ function openDeepgram(cfg, { onText, onError, onClose }) {
     headers: { Authorization: 'Token ' + cfg.DEEPGRAM_API_KEY }
   });
   const queue = [];
-  let closed = false, lastAudio = Date.now();
+  let closed = false, closeRequested = false, lastAudio = Date.now();
 
   ws.on('open', () => { while (queue.length) ws.send(queue.shift()); });
   ws.on('message', (raw) => {
@@ -36,7 +36,11 @@ function openDeepgram(cfg, { onText, onError, onClose }) {
     onError(new Error(reason));
   });
   ws.on('error', (err) => { if (!closed) onError(err); });
-  ws.on('close', () => { closed = true; clearInterval(keep); onClose && onClose(); });
+  ws.on('close', (code, reason) => {
+    closed = true;
+    clearInterval(keep);
+    if (onClose) onClose(!closeRequested, code, reason.toString());
+  });
 
   
   const keep = setInterval(() => {
@@ -51,6 +55,7 @@ function openDeepgram(cfg, { onText, onError, onClose }) {
     },
     close() {
       if (closed) return;
+      closeRequested = true;
       closed = true; clearInterval(keep);
       try { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'CloseStream' })); } catch (e) { /* noop */ }
       setTimeout(() => { try { ws.close(); } catch (e) { /* noop */ } }, 300);

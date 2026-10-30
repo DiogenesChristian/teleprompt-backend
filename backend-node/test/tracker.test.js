@@ -44,6 +44,12 @@ test('marca âncora como dita quando as palavras dela são faladas', () => {
   assert.equal(s.anchors.a2, 'pendente');
 });
 
+test('não marca âncora com palavras fora de ordem ou muito distantes', () => {
+  const t = new Tracker(script());
+  const s = t.push('Duarte falou sobre assuntos diferentes e só depois Helena encerrou a entrevista.', true, 1000);
+  assert.equal(s.anchors.a2, 'pendente');
+});
+
 test('detecta improviso e sugere uma ponte para a próxima âncora pendente', () => {
   const t = new Tracker(script());
   t.push('boa noite o governo federal anunciou hoje um pacote de 12 bilhões', true, 1000);

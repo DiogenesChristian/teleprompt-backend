@@ -242,6 +242,22 @@ test('voz pela Deepgram: áudio vai para a API e a transcrição volta', async (
   } finally { await srv.stop(); dg.close(); }
 });
 
+test('voz pela Deepgram: queda inesperada avisa o cliente para acionar o fallback', async () => {
+  const dg = await fakeDeepgram([]);
+  const srv = await boot({ DEEPGRAM_API_KEY: 'chave-secreta', DEEPGRAM_URL: 'ws://localhost:' + dg.address().port });
+  try {
+    const c = client(srv.port); await c.register('Queda de voz', 'Apresentador');
+    const ws = await wsOpen(srv.port, c.token);
+    ws.send(JSON.stringify({ type: 'speech:start', engine: 'deepgram' }));
+    await new Promise((resolve) => dg.once('connection', resolve));
+    const upstream = dg.clients.values().next().value;
+    upstream.terminate();
+    const error = await ws.waitFor('speech:error');
+    assert.match(error.message, /Deepgram caiu/);
+    ws.close();
+  } finally { await srv.stop(); dg.close(); }
+});
+
 test('voz pela Deepgram sem chave: avisa o navegador para usar o reconhecimento local', async () => {
   const srv = await boot({ DEEPGRAM_API_KEY: '' });
   try {
@@ -249,6 +265,42 @@ test('voz pela Deepgram sem chave: avisa o navegador para usar o reconhecimento 
     const ws = await wsOpen(srv.port, c.token);
     ws.send(JSON.stringify({ type: 'speech:start', engine: 'deepgram' }));
     await ws.waitFor('speech:error');
+    ws.close();
+  } finally { await srv.stop(); }
+});
+
+test('voz mantém a posição correta no tópico após edição ao vivo', async () => {
+  const srv = await boot();
+  try {
+    const c = client(srv.port); await c.register('Edição e voz', 'Apresentador');
+    const initial = Object.assign(sample(), {
+      blocks: [
+        { id: 'b1', title: 'Abertura', text: 'Boa noite.' },
+        { id: 'b2', title: 'Detalhes', text: 'A ministra Helena Duarte afirmou que as obras começam pelo Nordeste com prioridade para a rodovia.' }
+      ],
+      anchors: []
+    });
+    const created = await c.call('PUT', '/api/scripts/rt-1', initial);
+    const ws = await wsOpen(srv.port, c.token);
+    ws.send(JSON.stringify({ type: 'join', scriptId: 'rt-1' }));
+    await ws.waitFor('presence');
+    ws.send(JSON.stringify({ type: 'speech:start', engine: 'browser' }));
+    ws.send(JSON.stringify({ type: 'speech:text', text: 'a ministra helena duarte afirmou que as obras começam pelo nordeste', final: true }));
+    const before = await ws.waitFor('tracker', (message) => message.blockId === 'b2');
+    assert.equal(before.blockTitle, 'Detalhes');
+    assert.equal(before.pos > 0, true);
+
+    const edited = Object.assign({}, created.body.script, {
+      baseUpdatedAt: created.body.script.updatedAt,
+      blocks: [
+        { id: 'b1', title: 'Abertura', text: 'Informação atualizada. ' + 'Mais contexto para a abertura. '.repeat(5) + 'Boa noite.' },
+        { id: 'b2', title: 'Detalhes', text: 'Atualização. ' + initial.blocks[1].text }
+      ]
+    });
+    assert.equal((await c.call('PUT', '/api/scripts/rt-1', edited)).status, 200);
+    const after = await ws.waitFor('tracker', (message) => message.blockId === 'b2' && message.pos >= before.pos);
+    assert.equal(after.blockTitle, 'Detalhes');
+    assert.equal(after.pos > before.pos, true);
     ws.close();
   } finally { await srv.stop(); }
 });

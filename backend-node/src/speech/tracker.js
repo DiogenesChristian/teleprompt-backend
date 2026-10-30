@@ -86,6 +86,7 @@ function same(a, b) {
 const FUZZY_TAIL = 8;      
 const FUZZY_RATIO = 0.6;   
 const READING_MS = 4000;   
+const MAX_ANCHOR_GAP = 3;
 
 class Tracker {
   constructor(script) {
@@ -230,8 +231,19 @@ class Tracker {
     const recent = this.spoken.slice(-40).map((x) => x.w);
     this.anchorInfo.forEach((info) => {
       if (this.states[info.a.id] !== 'pendente') return;
-      const ok = info.key.every((k) => recent.some((w) => same(w, k)));
-      if (ok) this.states[info.a.id] = 'dita';
+      let from = 0, matched = true, first = true;
+      for (const token of info.key) {
+        let found = -1;
+        const start = first ? 0 : from;
+        const end = first ? recent.length : Math.min(recent.length, from + MAX_ANCHOR_GAP + 1);
+        for (let i = start; i < end; i++) {
+          if (same(recent[i], token)) { found = i; break; }
+        }
+        if (found < 0) { matched = false; break; }
+        from = found + 1;
+        first = false;
+      }
+      if (matched) this.states[info.a.id] = 'dita';
     });
   }
 
@@ -338,5 +350,4 @@ class Tracker {
 }
 
 module.exports = { Tracker, words, same, stem };
-
 
