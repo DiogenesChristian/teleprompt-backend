@@ -316,11 +316,15 @@ class Tracker {
     };
   }
 
-  snapshot(now) {
+    snapshot(now) {
+    const block = this.wordBlock[Math.min(this.pos, this.words.length - 1)] || 0;
+    const topico = (this.script.blocks || [])[block] || {};
     return {
       pos: this.pos,
       total: this.words.length,
-      block: this.wordBlock[Math.min(this.pos, this.words.length - 1)] || 0,
+      block: block,
+      blockId: topico.id || null,       // tópico atual (para o título mudar pela fala)
+      blockTitle: topico.title || '',
       wpm: this.wpm(now || Date.now()),
       // a fala está batendo com o roteiro agora (usado para começar a rolar sozinho)
       reading: !!this.lastMatchAt && (now || Date.now()) - this.lastMatchAt < READING_MS,
