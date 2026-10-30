@@ -141,3 +141,14 @@ test('sinaliza quando a leitura começou (para o teleprompter rodar sozinho)', (
   assert.equal(s.reading, true);
   assert.equal(t.snapshot(2000 + 5000).reading, false, 'parou de bater com o roteiro');
 });
+
+
+test('informa o tópico atual pela fala', () => {
+  const t = new Tracker(script());
+  let s = t.push('boa noite o governo federal anunciou', true, 1000);
+  assert.equal(s.blockId, 'b1');
+  assert.equal(s.blockTitle, 'Abertura');
+  s = t.push('a ministra helena duarte afirmou que as obras', true, 2000);
+  assert.equal(s.blockId, 'b2');
+  assert.equal(s.blockTitle, 'Detalhes');
+});
