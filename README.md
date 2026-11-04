@@ -89,3 +89,8 @@ A lista completa de mensagens está no começo de `backend-node/src/realtime.js`
 ### Espelho (Disaster Recovery)
 - A tela que controla a leitura manda a posição (`mirror:state`); as outras do mesmo roteiro seguem.
 - Se ela cair, todas recebem `control` com `id: null`; a reserva assume no manual. Quem volta depois vira espelho.
+
+
+## Voz acompanhando o texto
+
+Veja [alterações, roteiro de testes e demonstração na mentoria](docs/voz-acompanhando-texto.md).

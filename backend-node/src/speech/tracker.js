@@ -92,6 +92,9 @@ class Tracker {
   constructor(script) {
     this.load(script);
     this.pos = 0;
+    this.pace = [];
+    this.lastFinalAt = null;
+    this.interimText = null;
     this.spoken = [];          
     this.lastMatchAt = 0;
     this.unmatched = 0;
@@ -154,15 +157,44 @@ class Tracker {
   }
 
   setAnchor(id, state) { if (this.states[id]) this.states[id] = state; }
-  setPosition(wordIndex) { this.pos = Math.max(0, Math.min(this.words.length, wordIndex | 0)); this.unmatched = 0; }
+  setPosition(wordIndex) {
+    this.pos = Math.max(0, Math.min(this.words.length, wordIndex | 0));
+    this.unmatched = 0;
+    this.spoken = [];
+    this.pace = [];
+    this.lastFinalAt = null;
+    this.interimText = null;
+    this.lastMatchAt = 0;
+    this.offScript = false;
+    this.bridge = null;
+  }
   setClock(elapsedSec) { this.elapsedSec = Math.max(0, +elapsedSec || 0); }
 
   
   push(text, isFinal, now) {
-    now = now || Date.now();
-    if (!isFinal) return this.snapshot(now);
+    now = now ?? Date.now();
+    if (!isFinal) {
+      // Parciais substituem a hipótese anterior; nunca confirmam âncoras ou ritmo.
+      if (text === this.interimText) return this.snapshot(now);
+      this.interimText = text;
+      const hypothesis = words(text);
+      if (!hypothesis.length) return this.snapshot(now);
+      const committed = this.spoken, pos = this.pos;
+      this.spoken = committed.concat(hypothesis.map((w) => ({ w, t: now })));
+      const matched = this.align();
+      this.spoken = committed;
+      this.pos = Math.max(pos, this.pos);
+      if (matched) this.lastMatchAt = now;
+      return this.snapshot(now);
+    }
+    this.interimText = null;
     const ws = words(text);
     if (!ws.length) return this.snapshot(now);
+    if (this.lastFinalAt !== null && now > this.lastFinalAt) {
+      this.pace.push({ count: ws.length, start: this.lastFinalAt, end: now });
+    }
+    this.lastFinalAt = now;
+    this.pace = this.pace.filter((x) => now - x.end < 10000);
     ws.forEach((w) => this.spoken.push({ w, t: now }));
     this.spoken = this.spoken.slice(-60);
 
@@ -192,38 +224,43 @@ class Tracker {
       let score = 0;
       for (let j = 0; j < n; j++) if (same(this.words[i + j], tail[j])) score++;
       const dist = Math.abs(i - this.pos);
+      if (!same(this.words[i + n - 1], tail[n - 1])) continue;
       if (score > bestScore || (score === bestScore && dist < bestDist)) { best = i; bestScore = score; bestDist = dist; }
     }
     const need = n >= 4 ? 3 : n;
-    if (best >= 0 && bestScore >= need) { this.pos = Math.min(this.words.length, best + n); return true; }
+    if (best >= 0 && bestScore >= need) { this.pos = Math.max(this.pos, Math.min(this.words.length, best + n)); return true; }
     return this.alignLoose();
   }
 
   
   alignLoose() {
-    const tail = this.spoken.map((x) => x.w).filter((w) => !STOP.has(w)).slice(-FUZZY_TAIL);
-    if (tail.length < 3) return false;
-    const need = Math.max(3, Math.ceil(tail.length * FUZZY_RATIO));
-    const span = tail.length * 2 + 4;
-    const from = Math.max(0, this.pos - SEARCH_BACK), to = Math.min(this.words.length - 1, this.pos + SEARCH_AHEAD);
+    const recent = this.spoken.map((x) => x.w).filter((w) => !STOP.has(w)).slice(-FUZZY_TAIL);
     let best = null;
-    for (let i = from; i <= to; i++) {
-      // casamento em ordem (subsequência), guloso
-      let j = 0, k = i, hits = 0, last = -1;
-      const lim = Math.min(this.words.length, i + span);
-      while (j < tail.length && k < lim) {
-        if (STOP.has(this.words[k])) { k++; continue; }
-        let found = -1;
-        for (let m = k; m < Math.min(lim, k + 4); m++) if (same(this.words[m], tail[j])) { found = m; break; }
-        if (found >= 0) { hits++; last = found; k = found + 1; }
-        j++;
+    const from = Math.max(0, this.pos - SEARCH_BACK);
+    const to = Math.min(this.words.length - 1, this.pos + SEARCH_AHEAD);
+    // Sufixos curtos permitem retomar após gagueira, correção ou frase pulada.
+    for (let size = 3; size <= recent.length; size++) {
+      const tail = recent.slice(-size);
+      for (let i = from; i <= to; i++) {
+        let k = i, hits = 0, last = -1, lastInput = -1;
+        const lim = Math.min(this.words.length, i + size * 2 + 4);
+        for (let j = 0; j < tail.length; j++) {
+          let found = -1;
+          for (let m = k; m < Math.min(lim, k + 5); m++) {
+            if (same(this.words[m], tail[j])) { found = m; break; }
+          }
+          if (found >= 0) { hits++; last = found; lastInput = j; k = found + 1; }
+        }
+        if (hits < Math.max(3, Math.ceil(size * FUZZY_RATIO)) || lastInput !== size - 1) continue;
+        const score = hits - (size - hits) * 0.6;
+        const dist = Math.abs(i - this.pos);
+        if (!best || score > best.score || (score === best.score && dist < best.dist)) {
+          best = { score, last, dist };
+        }
       }
-      if (hits < need || last < 0) continue;
-      const dist = Math.abs(i - this.pos);
-      if (!best || hits > best.hits || (hits === best.hits && dist < best.dist)) best = { hits, last, dist };
     }
     if (!best) return false;
-    this.pos = Math.min(this.words.length, best.last + 1);
+    this.pos = Math.max(this.pos, Math.min(this.words.length, best.last + 1));
     return true;
   }
 
@@ -254,10 +291,16 @@ class Tracker {
   }
 
   wpm(now) {
-    const recent = this.spoken.filter((x) => now - x.t <= 10000);
-    if (recent.length < 4) return null;
-    const span = Math.max(3000, now - recent[0].t);
-    return Math.round(recent.length / span * 60000);
+    const recent = this.pace.filter((x) => now - x.end < 10000);
+    if (!recent.length) return null;
+    let count = 0, duration = 0;
+    for (const x of recent) {
+      const overlap = x.end - Math.max(x.start, now - 10000);
+      count += x.count * overlap / (x.end - x.start);
+      duration += overlap;
+    }
+    if (duration < 1500) return null;
+    return Math.round(count / duration * 60000);
   }
 
  
@@ -337,9 +380,9 @@ class Tracker {
       block: block,
       blockId: topico.id || null,       // tópico atual (para o título mudar pela fala)
       blockTitle: topico.title || '',
-      wpm: this.wpm(now || Date.now()),
+      wpm: this.wpm(now ?? Date.now()),
       // a fala está batendo com o roteiro agora (usado para começar a rolar sozinho)
-      reading: !!this.lastMatchAt && (now || Date.now()) - this.lastMatchAt < READING_MS,
+      reading: !!this.lastMatchAt && (now ?? Date.now()) - this.lastMatchAt < READING_MS,
       anchors: Object.assign({}, this.states),
       behind: this.behind(),
       offScript: this.offScript,

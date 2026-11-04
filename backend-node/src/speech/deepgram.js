@@ -22,12 +22,18 @@ function openDeepgram(cfg, { onText, onError, onClose }) {
     headers: { Authorization: 'Token ' + cfg.DEEPGRAM_API_KEY }
   });
   const queue = [];
+  let finalizedUntil = -1;
   let closed = false, closeRequested = false, lastAudio = Date.now();
 
   ws.on('open', () => { while (queue.length) ws.send(queue.shift()); });
   ws.on('message', (raw) => {
     let msg; try { msg = JSON.parse(raw.toString()); } catch (e) { return; }
-    if (msg.type !== 'Results') return;
+    if (closed || msg.type !== 'Results') return;
+    // Parciais revisam o mesmo segmento; finais repetidos não são nova fala.
+    const timed = Number.isFinite(msg.start) && Number.isFinite(msg.duration);
+    const end = timed ? msg.start + msg.duration : null;
+    if (timed && end <= finalizedUntil) return;
+    if (msg.is_final && timed) finalizedUntil = end;
     const alt = msg.channel && msg.channel.alternatives && msg.channel.alternatives[0];
     if (alt && alt.transcript) onText(alt.transcript, !!msg.is_final);
   });
