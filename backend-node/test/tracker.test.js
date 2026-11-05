@@ -158,3 +158,57 @@ test('informa o tópico atual pela fala', () => {
   assert.equal(s.blockId, 'b2');
   assert.equal(s.blockTitle, 'Detalhes');
 });
+
+
+test('Bia: ponte usa texto natural e prioriza essencial pulada', () => {
+  const t = new Tracker(script());
+  t.setPosition(25);
+  const bridge = t.makeBridge();
+  assert.equal(bridge.anchorId, 'a1');
+  assert.match(bridge.text, /Outro dado importante/);
+  assert.equal(bridge.resumeBlock, 0);
+  assert.ok(bridge.resumeText);
+});
+
+test('Bia: behind ordena essenciais antes das cortáveis', () => {
+  const t = new Tracker(script());
+  t.setPosition(t.words.length);
+  const late = t.behind();
+  assert.ok(late.includes('a1'));
+  assert.ok(late.includes('a2'));
+  assert.ok(late.indexOf('a2') < late.indexOf('a3'));
+});
+
+test('Bia: plano de corte sugere blocos sem essenciais pendentes', () => {
+  const t = new Tracker(script());
+  t.setClock(55);
+  const plan = t.cutPlan();
+  assert.equal(plan.tight, true);
+  assert.ok(plan.essential.includes('a1'));
+  assert.ok(plan.essential.includes('a2'));
+  assert.ok(plan.essential.includes('a4'));
+  assert.ok(plan.cuttable.includes('a3'));
+  assert.deepEqual(plan.suggestedCuts, []);
+  assert.equal(plan.estimatedSavedSec, 0);
+  assert.equal(plan.enoughCuts, false);
+});
+
+test('Bia: corte sugere bloco livre e estima economia', () => {
+  const data = script();
+  data.anchors = data.anchors.filter((a) => a.blockId !== 'b3');
+  const t = new Tracker(data);
+  t.setClock(55);
+  const plan = t.cutPlan();
+  assert.equal(plan.tight, true);
+  assert.ok(plan.suggestedCuts.includes('b3'));
+  assert.ok(plan.estimatedSavedSec > 0);
+  assert.equal(plan.enoughCuts, plan.estimatedSavedSec >= plan.deficitSec);
+});
+
+test('Bia: ponte sem âncoras pendentes mantém retomada', () => {
+  const t = new Tracker(script());
+  for (const a of t.script.anchors) t.setAnchor(a.id, 'dita');
+  const bridge = t.makeBridge();
+  assert.equal(bridge.anchorId, null);
+  assert.ok(bridge.text);
+});
