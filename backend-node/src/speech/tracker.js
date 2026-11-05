@@ -287,6 +287,7 @@ class Tracker {
   behind() {
     return this.anchorInfo
       .filter((i) => this.states[i.a.id] === 'pendente' && i.end > 0 && i.end + 3 < this.pos)
+      .sort((x, y) => Number(y.a.priority === 'essencial') - Number(x.a.priority === 'essencial') || x.start - y.start)
       .map((i) => i.a.id);
   }
 
@@ -305,32 +306,36 @@ class Tracker {
 
  
   makeBridge() {
-    const pending = this.anchorInfo.filter((i) => this.states[i.a.id] === 'pendente');
-    const late = pending.filter((i) => i.end + 3 < this.pos);
-    const ahead = pending.filter((i) => i.end + 3 >= this.pos).sort((x, y) => x.start - y.start);
-    const pick = late.find((i) => i.a.priority === 'essencial') || ahead[0] || late[0];
+    const pending = this.anchorInfo.filter((i) => this.states[i.a.id] === 'pendente' && i.block >= 0);
+    const late = pending.filter((i) => i.end > 0 && i.end + 3 < this.pos).sort((a, b) => a.start - b.start);
+    const ahead = pending.filter((i) => !(i.end > 0 && i.end + 3 < this.pos)).sort((a, b) => a.start - b.start);
+    // Nunca deixe uma informação essencial esquecida atrás de uma cortável.
+    const pick = late.find((i) => i.a.priority === 'essencial') ||
+      ahead.find((i) => i.a.priority === 'essencial') || ahead[0] || late[0];
     const block = this.wordBlock[Math.min(this.pos, this.words.length - 1)] || 0;
     const resume = this.resumeText(this.pos);
     if (!pick) {
-      return { text: 'Voltando ao nosso assunto…', anchorId: null, resumeAt: this.pos, resumeBlock: block, resumeText: resume };
+      return { text: 'Retomando o nosso roteiro…', anchorId: null, resumeAt: this.pos, resumeBlock: block, resumeText: resume };
     }
-    const a = pick.a;
+    const a = pick.a, isLate = late.includes(pick);
+    const subject = String(a.text || a.label || '').trim();
+    const label = String(a.label || subject).trim();
     const templates = {
-      nome: 'Voltando ao que disse ' + a.text + '…',
-      data: 'E vale lembrar a data: ' + a.text + '.',
-      valor: 'Voltando aos números: ' + a.text + '.',
-      numero: 'Voltando aos números: ' + a.text + '.',
-      cta: 'Antes de seguir: ' + a.text + '.',
-      encerramento: 'E para encerrar…'
+      nome: 'Retomando uma informação importante: ' + subject + '.',
+      data: 'Vale lembrar também a data: ' + subject + '.',
+      valor: 'Outro dado importante é ' + subject + '.',
+      numero: 'Outro número importante é ' + subject + '.',
+      cta: 'Antes de continuar, um lembrete: ' + subject + '.',
+      encerramento: 'Para concluir, vamos ao encerramento.'
     };
-    const late1 = late.indexOf(pick) >= 0;
+    const text = templates[a.type] || (isLate
+      ? 'Antes de seguir, precisamos retomar: ' + label + '.'
+      : 'Agora, vamos ao próximo ponto: ' + label + '.');
     return {
-      text: templates[a.type] || (late1 ? 'Um ponto importante: ' + a.label + '.' : 'Isso nos leva ao próximo ponto: ' + a.label + '.'),
-      anchorId: a.id,
-      anchorLabel: a.label,
-      resumeAt: late1 ? pick.start : this.pos,
-      resumeBlock: late1 ? pick.block : block,
-      resumeText: late1 ? this.resumeText(pick.start) : resume
+      text, anchorId: a.id, anchorLabel: label,
+      resumeAt: isLate ? pick.start : this.pos,
+      resumeBlock: isLate ? pick.block : block,
+      resumeText: isLate ? this.resumeText(pick.start) : resume
     };
   }
 
@@ -354,20 +359,31 @@ class Tracker {
     const duration = +this.script.durationSec || 0;
     if (!duration) return { tight: false };
     const remainingSec = duration - this.elapsedSec;
-    const needSec = (this.words.length - this.pos) / REF_WPM * 60;
+    const needSec = Math.max(0, this.words.length - this.pos) / REF_WPM * 60;
     const deficitSec = Math.round(needSec - remainingSec);
     if (deficitSec <= Math.max(5, duration * 0.05)) return { tight: false, deficitSec: Math.max(0, deficitSec) };
+
     const cur = this.wordBlock[Math.min(this.pos, this.words.length - 1)] || 0;
-    const pending = this.anchorInfo.filter((i) => this.states[i.a.id] === 'pendente' && i.block >= cur);
+    const pending = this.anchorInfo.filter((i) => this.states[i.a.id] === 'pendente');
+    const essential = pending.filter((i) => i.a.priority === 'essencial').map((i) => i.a.id);
+    const cuttable = pending.filter((i) => i.block >= cur && i.a.priority !== 'essencial').map((i) => i.a.id);
     const cuttableBlocks = (this.script.blocks || []).map((b, i) => ({ b, i }))
-      .filter(({ b, i }) => i > cur && this.anchorInfo.every((x) => x.block !== i || x.a.priority !== 'essencial' || this.states[x.a.id] !== 'pendente'))
-      .map(({ b }) => ({ id: b.id, title: b.title, saveSec: Math.round(words(b.text).length / REF_WPM * 60) }));
+      .filter(({ i }) => i > cur && !this.anchorInfo.some((a) =>
+        a.block === i && a.a.priority === 'essencial' && this.states[a.a.id] === 'pendente'))
+      .map(({ b }) => ({
+        id: b.id, title: b.title, saveSec: Math.round(words(b.text).length / REF_WPM * 60)
+      }))
+      .sort((a, b) => b.saveSec - a.saveSec);
+    let estimatedSavedSec = 0;
+    const suggestedCuts = [];
+    for (const block of cuttableBlocks) {
+      if (estimatedSavedSec >= deficitSec) break;
+      suggestedCuts.push(block.id);
+      estimatedSavedSec += block.saveSec;
+    }
     return {
-      tight: true,
-      deficitSec,
-      essential: pending.filter((i) => i.a.priority === 'essencial').map((i) => i.a.id),
-      cuttable: pending.filter((i) => i.a.priority !== 'essencial').map((i) => i.a.id),
-      cuttableBlocks
+      tight: true, deficitSec, essential, cuttable, cuttableBlocks,
+      suggestedCuts, estimatedSavedSec, enoughCuts: estimatedSavedSec >= deficitSec
     };
   }
 
