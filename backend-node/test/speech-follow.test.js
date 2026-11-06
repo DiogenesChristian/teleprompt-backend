@@ -44,6 +44,25 @@ test('palavras antigas não mantêm leitura durante improviso', () => {
   assert.equal(s.reading, false);
 });
 
+test('pausa ao perder o trecho e só retoma com fala confirmada durante o improviso', () => {
+  const t = new Tracker(script);
+  const pos = t.push('a ministra Helena Duarte afirmou', true, 1000).pos;
+  let s = t.push('e', true, 2000);
+  assert.equal(s.reading, false);
+  assert.equal(s.pos, pos);
+  s = t.push('minha viagem teve passeios completamente diferentes durante aquelas férias', true, 6000);
+  assert.equal(s.offScript, true);
+  assert.ok(s.bridge);
+  s = t.push('as obras começam pelo Nordeste', false, 6500);
+  assert.equal(s.pos, pos);
+  assert.equal(s.offScript, true);
+  s = t.push('as obras começam pelo Nordeste', true, 7000);
+  assert.ok(s.pos > pos);
+  assert.equal(s.reading, true);
+  assert.equal(s.offScript, false);
+  assert.equal(s.bridge, null);
+});
+
 for (const wpm of [90, 150, 220]) {
   test(`ritmo de ${wpm} ppm independe de lote de transcrição`, () => {
     const t = new Tracker(script);

@@ -96,7 +96,9 @@ class Tracker {
     this.lastFinalAt = null;
     this.interimText = null;
     this.spoken = [];          
-    this.lastMatchAt = 0;
+    this.lastMatchAt = null;
+    this.aligned = false;
+    this.missedSince = null;
     this.unmatched = 0;
     this.offScript = false;
     this.bridge = null;
@@ -136,6 +138,9 @@ class Tracker {
     if (old && typeof old.pos === 'number') {
       this.pos = this.remap(old);
       this.unmatched = 0;
+      this.missedSince = null;
+      this.offScript = false;
+      this.bridge = null;
       if (this.spoken && this.spoken.length >= 3) this.align(); // ajusta pelo que acabou de ser dito
     }
   }
@@ -164,7 +169,9 @@ class Tracker {
     this.pace = [];
     this.lastFinalAt = null;
     this.interimText = null;
-    this.lastMatchAt = 0;
+    this.lastMatchAt = null;
+    this.aligned = false;
+    this.missedSince = null;
     this.offScript = false;
     this.bridge = null;
   }
@@ -183,7 +190,8 @@ class Tracker {
       this.spoken = committed.concat(hypothesis.map((w) => ({ w, t: now })));
       const matched = this.align();
       this.spoken = committed;
-      this.pos = Math.max(pos, this.pos);
+      this.pos = this.offScript ? pos : Math.max(pos, this.pos);
+      this.aligned = matched;
       if (matched) this.lastMatchAt = now;
       return this.snapshot(now);
     }
@@ -198,13 +206,20 @@ class Tracker {
     ws.forEach((w) => this.spoken.push({ w, t: now }));
     this.spoken = this.spoken.slice(-60);
 
-    const matched = this.align(now);
-    if (matched) { this.unmatched = 0; this.lastMatchAt = now; }
-    else this.unmatched += ws.length;
+    const matched = this.align();
+    this.aligned = matched;
+    if (matched) {
+      this.unmatched = 0;
+      this.lastMatchAt = now;
+      this.missedSince = null;
+    } else {
+      this.unmatched += ws.length;
+      if (this.missedSince === null) this.missedSince = this.lastMatchAt ?? now;
+    }
 
     this.markAnchors();
     const wasOff = this.offScript;
-    this.offScript = !matched && this.unmatched >= OFF_WORDS && now - (this.lastMatchAt || 0) >= OFF_MS;
+    this.offScript = !matched && this.pos < this.words.length && this.unmatched >= OFF_WORDS && now - this.missedSince >= OFF_MS;
     if (this.offScript && !wasOff) this.bridge = this.makeBridge();
     if (!this.offScript) this.bridge = null;
     return this.snapshot(now);
@@ -212,7 +227,9 @@ class Tracker {
 
   
   align() {
-    const tail = this.spoken.slice(-4).map((x) => x.w);
+    const now = this.spoken[this.spoken.length - 1].t;
+    const recent = this.spoken.filter((x) => now - x.t < READING_MS);
+    const tail = recent.slice(-4).map((x) => x.w);
     if (tail.length < 3) {
       // começo da fala: aceita 2 palavras se baterem exatamente
       if (tail.length < 2) return false;
@@ -224,17 +241,18 @@ class Tracker {
       let score = 0;
       for (let j = 0; j < n; j++) if (same(this.words[i + j], tail[j])) score++;
       const dist = Math.abs(i - this.pos);
-      if (!same(this.words[i + n - 1], tail[n - 1])) continue;
+      if ((this.offScript && i + n <= this.pos) || !same(this.words[i + n - 1], tail[n - 1])) continue;
       if (score > bestScore || (score === bestScore && dist < bestDist)) { best = i; bestScore = score; bestDist = dist; }
     }
     const need = n >= 4 ? 3 : n;
     if (best >= 0 && bestScore >= need) { this.pos = Math.max(this.pos, Math.min(this.words.length, best + n)); return true; }
-    return this.alignLoose();
+    return this.alignLoose(recent);
   }
 
   
-  alignLoose() {
-    const recent = this.spoken.map((x) => x.w).filter((w) => !STOP.has(w)).slice(-FUZZY_TAIL);
+  alignLoose(spoken) {
+    if (STOP.has(spoken[spoken.length - 1].w)) return false;
+    const recent = spoken.map((x) => x.w).filter((w) => !STOP.has(w)).slice(-FUZZY_TAIL);
     let best = null;
     const from = Math.max(0, this.pos - SEARCH_BACK);
     const to = Math.min(this.words.length - 1, this.pos + SEARCH_AHEAD);
@@ -252,6 +270,7 @@ class Tracker {
           if (found >= 0) { hits++; last = found; lastInput = j; k = found + 1; }
         }
         if (hits < Math.max(3, Math.ceil(size * FUZZY_RATIO)) || lastInput !== size - 1) continue;
+        if (this.offScript && last < this.pos) continue;
         const score = hits - (size - hits) * 0.6;
         const dist = Math.abs(i - this.pos);
         if (!best || score > best.score || (score === best.score && dist < best.dist)) {
@@ -398,7 +417,7 @@ class Tracker {
       blockTitle: topico.title || '',
       wpm: this.wpm(now ?? Date.now()),
       // a fala está batendo com o roteiro agora (usado para começar a rolar sozinho)
-      reading: !!this.lastMatchAt && (now ?? Date.now()) - this.lastMatchAt < READING_MS,
+      reading: this.aligned && !this.offScript && (now ?? Date.now()) - this.lastMatchAt < READING_MS,
       anchors: Object.assign({}, this.states),
       behind: this.behind(),
       offScript: this.offScript,
