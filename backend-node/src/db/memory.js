@@ -12,20 +12,26 @@ function createMemoryDb(file) {
     try { Object.assign(data, JSON.parse(fs.readFileSync(file, 'utf8'))); } catch (e) { /* arquivo corrompido: começa vazio */ }
   }
   let timer = null;
+  function flush() {
+    if (timer === null) return;
+    clearTimeout(timer);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const temporary = file + '.tmp';
+    fs.writeFileSync(temporary, JSON.stringify(data, null, 2));
+    fs.renameSync(temporary, file);
+    timer = null;
+  }
   function save() {
     if (!file) return;
     clearTimeout(timer);
-    timer = setTimeout(() => {
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, JSON.stringify(data, null, 2));
-    }, 100);
+    timer = setTimeout(flush, 100);
   }
   const clone = (o) => (o == null ? o : JSON.parse(JSON.stringify(o)));
 
   return {
     kind: 'memória',
     async connect() {},
-    async close() { clearTimeout(timer); },
+    async close() { flush(); },
     users: {
       async findByName(name) {
         const n = String(name).trim().toLowerCase();
