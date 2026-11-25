@@ -21,8 +21,8 @@ const uid = (p) => p + '-' + crypto.randomBytes(5).toString('hex');
 // texto falado (o que a aprovação cobre): tópicos e seus textos
 const textSig = (s) => JSON.stringify((s && s.blocks || []).map((b) => [b.id, b.text]));
 // tudo que é "edição de conteúdo": título, tópicos e âncoras
-const editSig = (s) => JSON.stringify([s && s.title, (s && s.blocks || []).map((b) => [b.id, b.title, b.text]),
-  (s && s.anchors || []).map((a) => [a.id, a.blockId, a.text, a.label, a.type, a.priority])]);
+const anchorFields = (s) => (s && s.anchors || []).map((a) => [a.id, a.blockId, a.text, a.label, a.type, a.priority]);
+const editSig = (s) => JSON.stringify([s && s.title, (s && s.blocks || []).map((b) => [b.id, b.title, b.text]), anchorFields(s)]);
 const hhmm = (ts) => new Date(ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
@@ -142,8 +142,9 @@ function createApp({ cfg, db, hub }) {
     }
     await db.scripts.upsert(script);
     const changed = changedBlocks(old, script);
-        const mudouOrdem = old && orderChanged(old, script);
-    if (old && (changed.length || mudouOrdem || old.title !== script.title || (old.anchors || []).length !== script.anchors.length)) {
+    const mudouOrdem = old && orderChanged(old, script);
+    const anchorsChanged = old && JSON.stringify(anchorFields(old)) !== JSON.stringify(anchorFields(script));
+    if (old && (changed.length || mudouOrdem || old.title !== script.title || anchorsChanged)) {
       hub.scriptUpdated(script, { by: req.user.name, changed });
     }
     res.json({ script });

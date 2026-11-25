@@ -387,6 +387,7 @@ test('tempo real: mudar título, duração ou ordem dos tópicos também avisa',
     ws.close();
   } finally { await srv.stop(); }
 });
+
 test('stop persiste as últimas alterações e exclusões antes de reabrir o banco', async (t) => {
   const fs = require('node:fs');
   const os = require('node:os');
@@ -406,4 +407,34 @@ test('stop persiste as últimas alterações e exclusões antes de reabrir o ban
   const reopened = createMemoryDb(file);
   assert.equal((await reopened.scripts.get('edited')).title, 'Última alteração');
   assert.equal(await reopened.scripts.get('deleted'), null);
+});
+
+test('tempo real: duas telas recebem a edição de uma âncora existente', async () => {
+  const srv = await boot();
+  try {
+    const editor = client(srv.port);
+    const reader = client(srv.port);
+    await editor.register('Gabrielle', 'Jornalista / Editor');
+    await reader.register('Apresentador', 'Apresentador');
+    const s = sample();
+    s.blocks.push({ id: 'b2', title: 'Fim', durationSec: 10, text: 'Orçamento para obras.' });
+    assert.equal((await editor.call('PUT', '/api/scripts/rt-1', s)).status, 200);
+    const screens = await Promise.all([wsOpen(srv.port, reader.token), wsOpen(srv.port, reader.token)]);
+    const watcher = await wsOpen(srv.port, editor.token);
+    watcher.send(JSON.stringify({ type: 'script:watch', scriptId: s.id }));
+    for (const screen of screens) {
+      screen.send(JSON.stringify({ type: 'join', scriptId: s.id }));
+      await screen.waitFor('presence');
+    }
+
+    assert.equal((await screens[0].waitFor('presence', (message) => message.count === 2)).count, 2);
+    Object.assign(s.anchors[0], { blockId: 'b2', text: 'Orçamento', label: 'Obras', priority: 'cortável' });
+    assert.equal((await editor.call('PUT', '/api/scripts/rt-1', s)).status, 200);
+    const updates = await Promise.all([...screens, watcher].map((screen) => screen.waitFor('script:updated')));
+    for (const update of updates) {
+      assert.deepEqual(update.script.anchors, s.anchors);
+      assert.deepEqual(update.changed, []);
+      assert.equal(update.by, 'Gabrielle');
+    }
+  } finally { await srv.stop(); }
 });
