@@ -124,6 +124,7 @@ function createHub({ server, cfg, db, openSpeech }) {
     if (ws.tracker) emitTracker(ws, ws.tracker.push(text, final, Date.now()));
   }
 
+  const scriptWatchers = new Map();
   wss.on('connection', (ws) => {
     ws.id = 'tela-' + (++seq);
     send(ws, { type: 'hello', cid: ws.id, user: { name: ws.user.name, role: ws.user.role }, speech: { deepgram: !!cfg.DEEPGRAM_API_KEY } });
@@ -137,7 +138,11 @@ function createHub({ server, cfg, db, openSpeech }) {
       let msg; try { msg = JSON.parse(raw.toString()); } catch (e) { return; }
       try {
         switch (msg.type) {
+          case 'script:watch':
+            scriptWatchers.set(ws, String(msg.scriptId || ''));
+            break;
           case 'join': {
+            scriptWatchers.delete(ws);
             leave(ws);
             const script = await db.scripts.get(String(msg.scriptId || ''));
             ws.scriptId = String(msg.scriptId || '');
@@ -225,6 +230,7 @@ function createHub({ server, cfg, db, openSpeech }) {
       }
     }
     ws.on('close', () => {
+      scriptWatchers.delete(ws);
       stopSpeech(ws);
       // a tela que apresentava caiu: as outras ficam sabendo onde o texto parou
       if (ws.scriptId && presenting(ws)) {
@@ -240,10 +246,11 @@ function createHub({ server, cfg, db, openSpeech }) {
   return {
     /* Chamado pela API quando um roteiro é salvo: avisa todos os teleprompters abertos. */
     scriptUpdated(script, info) {
-      const set = rooms.get(script.id); if (!set) return;
-      set.forEach((c) => {
+      const update = { type: 'script:updated', script, by: info.by, changed: info.changed || [] };
+      scriptWatchers.forEach((id, c) => { if (id === script.id) send(c, update); });
+      (rooms.get(script.id) || []).forEach((c) => {
         if (c.tracker) c.tracker.load(script); // a posição da voz é levada para a mesma palavra no texto novo
-        send(c, { type: 'script:updated', script, by: info.by, changed: info.changed || [] });
+        send(c, update);
         if (c.tracker) emitTracker(c, c.tracker.snapshot());
       });
     },
