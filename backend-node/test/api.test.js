@@ -387,6 +387,28 @@ test('tempo real: mudar título, duração ou ordem dos tópicos também avisa',
     ws.close();
   } finally { await srv.stop(); }
 });
+
+test('stop persiste as últimas alterações e exclusões antes de reabrir o banco', async (t) => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'teleprompt-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'data.json');
+  fs.writeFileSync(file, JSON.stringify({ scripts: [{ id: 'deleted' }, { id: 'edited', title: 'Original' }] }));
+
+  const running = await start({ port: 0, db: createMemoryDb(file) });
+  await running.db.scripts.remove('deleted');
+  await running.db.scripts.upsert({ id: 'edited', title: 'Última alteração' });
+  const shutdown = running.stop();
+  assert.equal(running.stop(), shutdown);
+  await shutdown;
+
+  const reopened = createMemoryDb(file);
+  assert.equal((await reopened.scripts.get('edited')).title, 'Última alteração');
+  assert.equal(await reopened.scripts.get('deleted'), null);
+});
+
 test('tempo real: duas telas recebem a edição de uma âncora existente', async () => {
   const srv = await boot();
   try {

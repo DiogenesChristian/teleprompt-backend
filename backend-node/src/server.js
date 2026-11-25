@@ -17,14 +17,38 @@ async function start(overrides = {}) {
   hubRef.hub = createHub({ server, cfg, db, openSpeech: overrides.openSpeech });
   await new Promise((r) => server.listen(overrides.port != null ? overrides.port : cfg.PORT, r));
   const port = server.address().port;
+  let stopping;
+  async function shutdown() {
+    const drained = new Promise((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+    hubRef.hub.close();
+    await drained;
+    await db.close();
+  }
   return {
     port, server, db, hub: hubRef.hub,
-    async stop() { hubRef.hub.close(); await new Promise((r) => server.close(r)); await db.close(); }
+    stop() { return stopping || (stopping = shutdown()); }
   };
 }
 
 if (require.main === module) {
-  start().then(({ port, db }) => {
+  let stopping = false;
+  const startup = start();
+  async function stop() {
+    if (stopping) return;
+    stopping = true;
+    try {
+      const running = await startup;
+      await running.stop();
+    } catch (error) {
+      console.error('Falha ao encerrar o backend:', error.message);
+      process.exitCode = 1;
+    }
+  }
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+  startup.then(({ port, db }) => {
     console.log('Globo Flow backend em http://localhost:' + port);
     console.log('Banco: ' + db.kind + ' · Voz: ' + (defaults.DEEPGRAM_API_KEY ? 'Deepgram (' + defaults.DEEPGRAM_LANGUAGE + ')' : 'reconhecimento do navegador (sem DEEPGRAM_API_KEY)'));
     console.log('Serviço de IA: ' + defaults.AI_SERVICE_URL);
