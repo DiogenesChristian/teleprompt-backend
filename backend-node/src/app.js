@@ -15,6 +15,9 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { ROLES, EDITOR, normalizeRole, sign, requireAuth } = require('./auth');
 
+const { object, nonempty, validateBlocks } = require('./validation');
+const invalid = (res, error) => res.status(400).json({ code: 'validation', error });
+
 const uid = (p) => p + '-' + crypto.randomBytes(5).toString('hex');
 
 /* Assinaturas para comparar versões de um roteiro. */
@@ -63,7 +66,8 @@ function createApp({ cfg, db, hub }) {
   /* ---------------- autenticação ---------------- */
   app.post('/api/auth/register', wrap(async (req, res) => {
     const { name, password, role, editorCode } = req.body || {};
-    const n = String(name || '').trim();
+    if (typeof name !== 'string' || typeof password !== 'string') return invalid(res, 'Informe nome e senha válidos.');
+    const n = name.trim();
     if (n.length < 2) return res.status(400).json({ error: 'Informe seu nome.' });
     if (String(password || '').length < 4) return res.status(400).json({ error: 'A senha precisa ter pelo menos 4 caracteres.' });
     const r = ROLES.includes(role) ? role : 'Apresentador';
@@ -88,7 +92,9 @@ function createApp({ cfg, db, hub }) {
 
   app.post('/api/auth/login', wrap(async (req, res) => {
     const { name, password } = req.body || {};
-    const n = String(name || '').trim();
+    if (typeof name !== 'string' || typeof password !== 'string') return invalid(res, 'Informe nome e senha válidos.');
+    const n = name.trim();
+    if (!n || !password.trim()) return invalid(res, 'Informe nome e senha.');
     const key = loginKey(req, n);
     const lockedMinutes = loginBlocked(req, n);
     if (lockedMinutes) return res.status(429).json({ error: 'Muitas tentativas. Tente novamente em alguns minutos.', retryAfterMinutes: lockedMinutes });
@@ -133,7 +139,12 @@ function createApp({ cfg, db, hub }) {
 
   app.put('/api/scripts/:id', auth, wrap(async (req, res) => {
     const body = req.body || {};
-    if (!Array.isArray(body.blocks)) return res.status(400).json({ error: 'Roteiro sem blocos.' });
+    const error = validateBlocks(body, body.status === 'aprovado');
+    if (error) return invalid(res, error);
+    if (!nonempty(body.title)) return invalid(res, 'Informe o título do roteiro.');
+    if (body.durationSec !== undefined && (!Number.isFinite(body.durationSec) || body.durationSec < 0)) return invalid(res, 'Duração do roteiro inválida.');
+    if (body.status !== undefined && !['rascunho', 'em-revisao', 'aprovado'].includes(body.status)) return invalid(res, 'Status do roteiro inválido.');
+    if (body.revisions !== undefined && (!Array.isArray(body.revisions) || body.revisions.some(r => !object(r)))) return invalid(res, 'Histórico de revisões inválido.');
     const old = await db.scripts.get(req.params.id);
     const approving = body.status === 'aprovado' && (!old || old.status !== 'aprovado' || old.approvedAt !== body.approvedAt);
     if (approving && req.user.role !== EDITOR) {
@@ -192,7 +203,8 @@ function createApp({ cfg, db, hub }) {
     if (!s) return res.status(404).json({ error: 'Roteiro não encontrado.' });
     const b = s.blocks.find((x) => x.id === req.params.blockId);
     if (!b) return res.status(404).json({ error: 'Bloco não encontrado.' });
-    if (typeof req.body.text !== 'string') return res.status(400).json({ error: 'Envie o novo texto.' });
+    if (!object(req.body) || typeof req.body.text !== 'string' || ((isLive(s.id) || s.status === 'aprovado') && !nonempty(req.body.text))) return invalid(res, 'Envie um texto válido para o bloco.');
+    if (req.body.baseText !== undefined && typeof req.body.baseText !== 'string') return invalid(res, 'Versão anterior do texto inválida.');
     // edição simultânea: baseText = o texto que a pessoa tinha na tela quando começou a editar
     if (typeof req.body.baseText === 'string' && req.body.baseText !== b.text && req.body.text !== b.text) return conflict(res, s);
     const live = isLive(s.id);
@@ -220,7 +232,7 @@ function createApp({ cfg, db, hub }) {
   app.get('/api/sessions', auth, wrap(async (req, res) => res.json({ sessions: await db.sessions.list() })));
   app.post('/api/sessions', auth, wrap(async (req, res) => {
     const s = req.body || {};
-    if (!s.id || !s.scriptId) return res.status(400).json({ error: 'Sessão incompleta.' });
+    if (!object(s) || !nonempty(s.id) || !nonempty(s.scriptId)) return invalid(res, 'Sessão incompleta: informe o identificador da sessão e do roteiro.');
     res.status(201).json({ session: await db.sessions.add(s) });
   }));
 
@@ -228,7 +240,9 @@ function createApp({ cfg, db, hub }) {
   // Mantém o endpoint /api/ai/review por compatibilidade, mas o serviço aplica regras textuais.
   app.post('/api/ai/review', auth, wrap(async (req, res) => {
     const { scriptId, blocks, anchors } = req.body || {};
-    if (!Array.isArray(blocks)) return res.status(400).json({ error: 'Envie os blocos do roteiro.' });
+    const error = validateBlocks(req.body, true);
+    if (error) return invalid(res, error);
+    if (scriptId != null && !nonempty(scriptId)) return invalid(res, 'Identificador do roteiro inválido.');
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), cfg.AI_TIMEOUT_MS);
     try {
@@ -240,7 +254,8 @@ function createApp({ cfg, db, hub }) {
       });
       if (!r.ok) return res.status(503).json({ error: 'Serviço de IA indisponível.' });
       const data = await r.json();
-      res.json({ suggestions: Array.isArray(data.suggestions) ? data.suggestions : [] });
+      if (!data || !Array.isArray(data.suggestions)) return res.status(503).json({ error: 'O serviço de revisão retornou uma resposta inválida. Tente novamente.' });
+      res.json({ suggestions: data.suggestions });
     } catch (e) {
       res.status(503).json({ error: 'Serviço de IA indisponível.' });
     } finally { clearTimeout(t); }
@@ -256,8 +271,11 @@ function createApp({ cfg, db, hub }) {
   app.use('/api', (req, res) => res.status(404).json({ error: 'Rota não encontrada.' }));
   // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {
+    if (res.headersSent) return next(err);
+    if (err.type === 'entity.parse.failed') return invalid(res, 'JSON inválido. Verifique os dados enviados.');
+    if (err.type === 'entity.too.large') return res.status(413).json({ error: 'Os dados enviados excedem o limite de 2 MB.' });
     console.error(err);
-    res.status(500).json({ error: 'Erro interno do servidor.' });
+    res.status(500).json({ error: 'Não foi possível concluir a operação. Tente novamente mais tarde.' });
   });
   return app;
 }

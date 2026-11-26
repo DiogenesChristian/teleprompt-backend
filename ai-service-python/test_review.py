@@ -344,3 +344,8 @@ def test_aceitar_tudo_converge(texto):
     """Depois de aceitar todas as trocas, o revisor não tem mais nenhuma troca para propor."""
     novo = aplicar(texto, rev(texto))
     assert [s for s in rev(novo) if s["suggestion"] is not None] == []
+@pytest.mark.parametrize('payload', [{}, {'blocks': []}, {'blocks': [None]}, {'blocks': [{'id':'b1'}]}, {'blocks': [{'id':'b1','text':'  '}]}, {'blocks': [{'id':'b1','text':123}]}, {'blocks': [{'id':'b1','text':'ok'}]*2}, {'blocks':[{'id':'b1','text':'ok'}],'anchors':[{'id':'a1','blockId':'missing'}]}])
+def test_rejeita_revisao_invalida(payload):
+    response = client.post('/review', json=payload)
+    assert response.status_code == 422
+    assert 'error' in response.json()

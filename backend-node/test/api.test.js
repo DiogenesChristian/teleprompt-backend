@@ -454,3 +454,28 @@ test('produção exige JWT seguro e código de editor', async () => {
   await assert.rejects(start({ port: 0, db: createMemoryDb(null), cfg: { NODE_ENV: 'production', JWT_SECRET: 'curto', EDITOR_CODE: 'globo' } }), /JWT_SECRET/);
   await assert.rejects(start({ port: 0, db: createMemoryDb(null), cfg: { NODE_ENV: 'production', JWT_SECRET: 'segredo-producao-64-caracteres-abcdefghijklmnopqrstuvwxyz-1234567890', EDITOR_CODE: '' } }), /EDITOR_CODE/);
 });
+
+test('validação rejeita blocos inválidos antes de salvar ou revisar', async () => {
+  let calls = 0;
+  const ai = await fakeAi((_req, res) => { calls++; res.end('{"suggestions":[]}'); });
+  const srv = await boot({ AI_SERVICE_URL: 'http://localhost:' + ai.address().port });
+  try {
+    const c = client(srv.port); await c.register('Validação', 'Produtor');
+    for (const blocks of [[], [null], [{id:'b1'}], [{id:'b1',text:123}], [sample().blocks[0],sample().blocks[0]]]) {
+      for (const [method,path] of [['PUT','/api/scripts/rt-1'],['POST','/api/ai/review']]) {
+        const r = await c.call(method,path,{...sample(),blocks});
+        assert.equal(r.status,400); assert.equal(r.body.code,'validation');
+      }
+    }
+    const draft = {...sample(),blocks:[{id:'b1',text:'  '}]};
+    assert.equal((await c.call('PUT','/api/scripts/rt-1',draft)).status,200);
+    assert.equal((await c.call('POST','/api/ai/review',draft)).status,400);
+    assert.equal(calls,0);
+    assert.equal((await c.call('POST','/api/sessions',{id:123})).status,400);
+    assert.equal((await c.call('PATCH','/api/scripts/rt-1/blocks/b1',{})).status,400);
+    const malformed = await fetch('http://localhost:'+srv.port+'/api/ai/review',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+c.token},body:'{'});
+    assert.equal(malformed.status,400);
+    assert.equal((await c.call('POST','/api/ai/review',sample())).status,200);
+    assert.equal(calls,1);
+  } finally { await srv.stop(); ai.close(); }
+});

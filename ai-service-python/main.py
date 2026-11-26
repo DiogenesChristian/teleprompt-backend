@@ -12,8 +12,10 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from fastapi import FastAPI
-from pydantic import BaseModel, Field
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from reviewer import review
 
@@ -23,7 +25,14 @@ app = FastAPI(title="Globo Flow — revisão textual por regras", version="1.0.0
 class Block(BaseModel):
     id: str
     title: str = ""
-    text: str = ""
+    text: str
+
+    @field_validator("id", "text")
+    @classmethod
+    def nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Campo vazio")
+        return value
 
 
 class Anchor(BaseModel):
@@ -37,8 +46,23 @@ class Anchor(BaseModel):
 
 class ReviewRequest(BaseModel):
     scriptId: Optional[str] = None
-    blocks: list[Block] = Field(default_factory=list)
+    blocks: list[Block] = Field(min_length=1)
     anchors: list[Anchor] = Field(default_factory=list)
+
+
+    @model_validator(mode="after")
+    def validate_links(self):
+        ids = {b.id for b in self.blocks}
+        if len(ids) != len(self.blocks):
+            raise ValueError("Identificadores de blocos duplicados")
+        if any(not a.id.strip() or a.blockId not in ids for a in self.anchors) or len({a.id for a in self.anchors}) != len(self.anchors):
+            raise ValueError("Âncora inválida ou duplicada")
+        return self
+
+
+@app.exception_handler(RequestValidationError)
+async def invalid_request(request: Request, exc: RequestValidationError):
+    return JSONResponse(status_code=422, content={"error": "Dados de revisão inválidos. Verifique os blocos e as âncoras."})
 
 
 class Suggestion(BaseModel):
