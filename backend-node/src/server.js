@@ -8,6 +8,13 @@ const { createHub } = require('./realtime');
 
 async function start(overrides = {}) {
   const cfg = Object.assign({}, defaults, overrides.cfg || {});
+  const weakJwt = typeof cfg.JWT_SECRET !== 'string' || cfg.JWT_SECRET.length < 32 || cfg.JWT_SECRET === 'troque-este-segredo';
+  if (weakJwt && cfg.NODE_ENV === 'production') {
+    throw new Error('JWT_SECRET ausente ou inseguro. Configure pelo menos 32 caracteres aleatórios.');
+  }
+  if (!cfg.EDITOR_CODE && cfg.NODE_ENV === 'production') {
+    throw new Error('EDITOR_CODE ausente. Configure um código obrigatório para cadastro de editores.');
+  }
   const db = overrides.db || createDb(cfg);
   await db.connect();
   const server = http.createServer();

@@ -1,6 +1,9 @@
-"""Globo Flow — serviço de IA (Python + FastAPI).
+"""Globo Flow — serviço de revisão textual por regras (Python + FastAPI).
 
-Chamado SOMENTE pelo backend Node.js (o frontend nunca fala direto com a IA):
+Este serviço não usa IA generativa: aplica padrões, expressões regulares e
+regras locais de gramática e leitura em voz alta.
+
+Chamado SOMENTE pelo backend Node.js (o frontend nunca fala direto com este serviço):
     Frontend → Backend Node.js (POST /api/ai/review) → este serviço (POST /review)
 
 Rodar:  uvicorn main:app --port 8000
@@ -14,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from reviewer import review
 
-app = FastAPI(title="Globo Flow — serviço de IA", version="1.0.0")
+app = FastAPI(title="Globo Flow — revisão textual por regras", version="1.0.0")
 
 
 class Block(BaseModel):

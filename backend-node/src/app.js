@@ -3,7 +3,7 @@
  *   /api/auth      cadastro, login e usuário atual
  *   /api/scripts   roteiros (lista, leitura, gravação, exclusão, troca de uma linha)
  *   /api/sessions  histórico de apresentações
- *   /api/ai/review revisão do roteiro → serviço de IA em Python
+ *   /api/ai/review revisão textual por regras (sem IA generativa)
  *   /api/speech    situação do reconhecimento de fala (Deepgram)
  *
  * O tempo real (teleprompter, voz e mudanças de última hora) fica em realtime.js.
@@ -76,11 +76,47 @@ function createApp({ cfg, db, hub }) {
     res.status(201).json({ token: sign(user, cfg.JWT_SECRET), user: { id: user.id, name: user.name, role: user.role } });
   }));
 
+  const loginAttempts = new Map();
+  const loginKey = (req, name) => `${req.ip || 'local'}:${String(name || '').trim().toLowerCase()}`;
+  function loginBlocked(req, name) {
+    const entry = loginAttempts.get(loginKey(req, name));
+    if (!entry) return 0;
+    if (entry.until && entry.until > Date.now()) return Math.ceil((entry.until - Date.now()) / 60000);
+    if (entry.until) loginAttempts.delete(loginKey(req, name));
+    return 0;
+  }
+
   app.post('/api/auth/login', wrap(async (req, res) => {
     const { name, password } = req.body || {};
-    const user = await db.users.findByName(String(name || ''));
-    if (!user) return res.status(404).json({ error: 'Usuário não encontrado.' });
-    if (!(await bcrypt.compare(String(password || ''), user.passwordHash))) return res.status(401).json({ error: 'Senha incorreta.' });
+    const n = String(name || '').trim();
+    const key = loginKey(req, n);
+    const lockedMinutes = loginBlocked(req, n);
+    if (lockedMinutes) return res.status(429).json({ error: 'Muitas tentativas. Tente novamente em alguns minutos.', retryAfterMinutes: lockedMinutes });
+    const user = await db.users.findByName(n);
+    if (!user) {
+      const entry = loginAttempts.get(key) || { count: 0, until: 0 };
+      entry.count += 1;
+      if (entry.count >= cfg.LOGIN_MAX_ATTEMPTS) {
+        entry.until = Date.now() + cfg.LOGIN_LOCK_MINUTES * 60000;
+        entry.count = 0;
+      }
+      loginAttempts.set(key, entry);
+      if (entry.until) return res.status(429).json({ error: 'Muitas tentativas. Tente novamente em alguns minutos.', retryAfterMinutes: cfg.LOGIN_LOCK_MINUTES });
+      return res.status(404).json({ error: 'Usuário não encontrado.' });
+    }
+    const valid = await bcrypt.compare(String(password || ''), user.passwordHash);
+    if (!valid) {
+      const entry = loginAttempts.get(key) || { count: 0, until: 0 };
+      entry.count += 1;
+      if (entry.count >= cfg.LOGIN_MAX_ATTEMPTS) {
+        entry.until = Date.now() + cfg.LOGIN_LOCK_MINUTES * 60000;
+        entry.count = 0;
+      }
+      loginAttempts.set(key, entry);
+      if (entry.until) return res.status(429).json({ error: 'Muitas tentativas. Tente novamente em alguns minutos.', retryAfterMinutes: cfg.LOGIN_LOCK_MINUTES });
+      return res.status(401).json({ error: 'Senha incorreta.' });
+    }
+    loginAttempts.delete(key);
     res.json({ token: sign(user, cfg.JWT_SECRET), user: { id: user.id, name: user.name, role: normalizeRole(user.role) } });
   }));
 
@@ -188,8 +224,8 @@ function createApp({ cfg, db, hub }) {
     res.status(201).json({ session: await db.sessions.add(s) });
   }));
 
-  /* ---------------- revisão com IA ---------------- */
-  // Contrato do README do frontend. O backend só repassa: quem decide é o editor (US05).
+  /* ---------------- revisão textual por regras ---------------- */
+  // Mantém o endpoint /api/ai/review por compatibilidade, mas o serviço aplica regras textuais.
   app.post('/api/ai/review', auth, wrap(async (req, res) => {
     const { scriptId, blocks, anchors } = req.body || {};
     if (!Array.isArray(blocks)) return res.status(400).json({ error: 'Envie os blocos do roteiro.' });

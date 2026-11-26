@@ -1,6 +1,6 @@
 # teleprompt-backend
 
-Projeto backend-only para teleprompter com API Node.js e serviço Python de IA.
+Projeto backend para teleprompter com API Node.js e serviço Python de revisão textual por regras (sem IA generativa).
 
 ## Estrutura atual
 
@@ -94,3 +94,30 @@ A lista completa de mensagens está no começo de `backend-node/src/realtime.js`
 ## Voz acompanhando o texto
 
 Veja [alterações, roteiro de testes e demonstração na mentoria](docs/voz-acompanhando-texto.md).
+
+## Segurança antes da publicação
+
+1. Copie `backend-node/.env.example` para `backend-node/.env`.
+2. Gere um `JWT_SECRET` aleatório com pelo menos 32 caracteres:
+   ```powershell
+   node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+   ```
+3. Defina `NODE_ENV=production` e um `EDITOR_CODE` secreto. A criação da conta `Jornalista / Editor` exige esse código.
+4. Ajuste `LOGIN_MAX_ATTEMPTS` (padrão 5) e `LOGIN_LOCK_MINUTES` (padrão 15).
+5. Configure `CORS_ORIGIN` apenas para os endereços reais do frontend.
+
+Em produção, o backend não inicia quando `JWT_SECRET` é curto/ausente ou `EDITOR_CODE` está vazio.
+
+## Segurança para publicação
+
+Antes de publicar:
+
+1. Gere um segredo JWT forte: `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`.
+2. Configure `JWT_SECRET`, `EDITOR_CODE`, `NODE_ENV=production`, `LOGIN_MAX_ATTEMPTS` e `LOGIN_LOCK_MINUTES` em `backend-node/.env`.
+3. Em produção o backend não inicia sem um `JWT_SECRET` com pelo menos 32 caracteres nem sem `EDITOR_CODE`.
+4. Só o perfil **Jornalista / Editor** pode aprovar roteiros, e o cadastro desse perfil exige o código configurado.
+5. Use HTTPS e restrinja `CORS_ORIGIN` aos domínios reais do frontend.
+
+## Revisão textual
+
+A revisão é determinística e baseada em expressões regulares e regras de gramática, repetição e leitura oral. **Não utiliza IA generativa nem envia fatos novos**; as sugestões passam pela decisão humana.

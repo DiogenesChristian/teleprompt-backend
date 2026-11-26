@@ -3,15 +3,21 @@
 require('dotenv').config({ quiet: true });
 
 const env = process.env;
+const crypto = require('crypto');
 
 module.exports = {
   PORT: +(env.PORT || 4000),
+  NODE_ENV: env.NODE_ENV || 'development',
   // MongoDB. Vazio = banco em memória salvo em arquivo (bom para desenvolvimento e apresentação).
   MONGODB_URI: env.MONGODB_URI || '',
   DATA_FILE: env.DATA_FILE || 'data/dev-db.json',
-  JWT_SECRET: env.JWT_SECRET || 'troque-este-segredo',
-  // Código exigido para criar conta de Jornalista / Editor (quem aprova roteiros). Vazio = sem código.
+  // JWT_SECRET não tem valor padrão seguro: produção deve fornecer um segredo forte via ambiente.
+  JWT_SECRET: env.JWT_SECRET || crypto.randomBytes(48).toString('base64url'),
+  // Código exigido para criar conta de Jornalista / Editor. Em produção deve ser configurado e obrigatório.
   EDITOR_CODE: env.EDITOR_CODE || '',
+  // Limite de tentativas de login por nome/IP.
+  LOGIN_MAX_ATTEMPTS: +(env.LOGIN_MAX_ATTEMPTS || 5),
+  LOGIN_LOCK_MINUTES: +(env.LOGIN_LOCK_MINUTES || 15),
   // Funções que podem alterar o texto de um roteiro que está NO AR (teleprompter rodando).
   // Separadas por vírgula. * = qualquer usuário logado.
   LIVE_EDIT_ROLES: (env.LIVE_EDIT_ROLES || 'Jornalista / Editor,Produtor').split(',').map((s) => s.trim()).filter(Boolean),

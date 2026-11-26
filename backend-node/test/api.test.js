@@ -438,3 +438,19 @@ test('tempo real: duas telas recebem a edição de uma âncora existente', async
     }
   } finally { await srv.stop(); }
 });
+
+test('login limita tentativas consecutivas', async () => {
+  const srv = await boot({ LOGIN_MAX_ATTEMPTS: 2, LOGIN_LOCK_MINUTES: 3 });
+  try {
+    const c = client(srv.port);
+    await c.register('Conta Limitada', 'Apresentador');
+    assert.equal((await c.call('POST', '/api/auth/login', { name: 'Conta Limitada', password: 'errada' })).status, 401);
+    assert.equal((await c.call('POST', '/api/auth/login', { name: 'Conta Limitada', password: 'errada' })).status, 429);
+    assert.equal((await c.call('POST', '/api/auth/login', { name: 'Conta Limitada', password: 'senha123' })).status, 429);
+  } finally { await srv.stop(); }
+});
+
+test('produção exige JWT seguro e código de editor', async () => {
+  await assert.rejects(start({ port: 0, db: createMemoryDb(null), cfg: { NODE_ENV: 'production', JWT_SECRET: 'curto', EDITOR_CODE: 'globo' } }), /JWT_SECRET/);
+  await assert.rejects(start({ port: 0, db: createMemoryDb(null), cfg: { NODE_ENV: 'production', JWT_SECRET: 'segredo-producao-64-caracteres-abcdefghijklmnopqrstuvwxyz-1234567890', EDITOR_CODE: '' } }), /EDITOR_CODE/);
+});
